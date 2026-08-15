@@ -1,0 +1,5 @@
+sys
+requests
+pandas
+sqlite3
+numpy

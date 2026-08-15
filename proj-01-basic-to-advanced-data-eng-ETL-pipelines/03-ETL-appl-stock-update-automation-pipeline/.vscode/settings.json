@@ -1,0 +1,16 @@
+{
+    "sqltools.connections": [
+        {
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "localhost",
+            "port": 5432,
+            "driver": "PostgreSQL",
+            "name": "ProMarketa_db",
+            "username": "postgres",
+            "password": "marketa40il13",
+            "database": "promarketa_db"
+        }
+    ],
+    "sqltools.useNodeRuntime": true
+}

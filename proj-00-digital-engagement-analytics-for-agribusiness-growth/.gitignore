@@ -1,0 +1,25 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+
+# Environments and Secrets
+.env
+.venv
+env/
+venv/
+.envrc
+
+# Data sets (Ignore raw and processed data, keep samples and documentation)
+data/*.csv
+data/*.parquet
+!data/sample_*.csv
+!data/README.md
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints

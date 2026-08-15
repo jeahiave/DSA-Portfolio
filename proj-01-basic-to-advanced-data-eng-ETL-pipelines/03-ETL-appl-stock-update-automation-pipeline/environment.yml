@@ -1,0 +1,50 @@
+name: dsa-lab
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - openpyxl
+  - lxml
+  - regex
+  - requests
+  - uvicorn
+  - pandas-datareader
+  - plotly
+  - mysqlclient
+  - dask
+  - matplotlib
+  - pip
+  - ydata-profiling
+  - h5py
+  - fastapi
+  - flask
+  - scrapy
+  - tqdm
+  - django
+  - jupyterlab
+  - pyspark
+  - statsmodels
+  - sqlalchemy
+  - seaborn
+  - nltk
+  - pyarrow
+  - beautifulsoup4
+  - ipykernel
+  - python=3.12
+  - selenium
+  - dash
+  - feather-format
+  - xlrd
+  - apache-airflow
+  - numpy
+  - psycopg2
+  - alembic
+  - boto3
+  - streamlit
+  - pandas
+  - black
+  - pre-commit
+  - scikit-learn
+  - scipy
+  - pytest
+prefix: /home/bhrajo/miniconda3/envs/dsa-lab

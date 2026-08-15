@@ -1,0 +1,8 @@
+# employee_records.db
+0 5 * * * /usr/bin/python3 /home/bhrajo/dsa-repo/dsa-workspace/data-engineering-lab/ETL/proj-05-ETL-daily-employee-record.py
+
+# global_education.db
+0 1 * * * /usr/bin/python3 /home/bhrajo/dsa-repo/dsa-workspace/data-engineering-lab/ETL/proj-06-ETL-global-education-data-pipeline/global_edu.py
+
+# earthquake_monitoring.db
+0 3 * * * /usr/bin/python3 /home/bhrajo/dsa-repo/dsa-workspace/data-engineering-lab/ETL/02-ETL-global-earthquake-data-pipeline/global_earthquake.py
