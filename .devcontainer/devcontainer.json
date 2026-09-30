@@ -1,13 +1,20 @@
 {
-    "name": "DSA Lab Workspace",
-    "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+    "name": "DSA Portfolio Workspace",
+    "image": "mcr.microsoft.com/devcontainers/python:3.13",
     "features": {
-        "ghcr.io/rocker-org/devcontainer-features/conda:1": {}
+        "ghcr.io/astral-sh/uv-devcontainer-features/uv:1": {}
     },
-    "postCreateCommand": "conda env create -f environment.yml && conda init && echo 'conda activate dsa-lab' >> ~/.bashrc",
+    "postCreateCommand": "cd proj-00-digital-engagement-analytics-for-agribusiness-growth && uv sync --locked && cd ../proj-01-basic-to-advanced-data-eng-ETL-pipelines && uv sync --locked",
     "customizations": {
         "vscode": {
-            "extensions": ["ms-python.python", "ms-toolsai.jupyter"]
+            "extensions": [
+                "ms-python.python",
+                "ms-toolsai.jupyter",
+                "charliermarsh.ruff"
+            ],
+            "settings": {
+                "python.defaultInterpreterPath": "${workspaceFolder}/proj-00-digital-engagement-analytics-for-agribusiness-growth/.venv/bin/python"
+            }
         }
     }
 }

@@ -1,0 +1,22 @@
+[project]
+name = "proj-00-agribusiness"
+version = "0.1.0"
+description = "Digital engagement analytics for agribusiness growth"
+requires-python = ">=3.13"
+dependencies = [
+    "feature-engine>=1.9.4",
+    "ipykernel>=7.4.0",
+    "lightgbm>=4.7.0",
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.3",
+    "pandas>=3.0.6",
+    "scikit-learn>=1.9.1",
+    "scipy>=1.18.1",
+    "seaborn>=0.13.2",
+    "shap>=0.52.0",
+    "tabulate>=0.10.0",
+    "xgboost>=3.4.1",
+]
+
+[tool.uv]
+package = false
