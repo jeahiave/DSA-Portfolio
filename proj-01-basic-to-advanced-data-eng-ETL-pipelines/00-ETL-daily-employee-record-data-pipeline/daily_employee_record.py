@@ -1,65 +1,63 @@
-#%%
-# Importing necessary libraries
+"""Fetch, validate, and refresh the mock employee directory snapshot."""
+from __future__ import annotations
+
+import os
 import sys
-import requests
+from pathlib import Path
+
 import pandas as pd
-import sqlite3 as sql 
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from pipeline_utils import apply_migrations, configure_logging, database_engine, fetch_json, load_frame, PipelineRun, validate_frame  # noqa: E402
+
+URL = os.getenv("EMPLOYEE_API_URL", "https://jsonplaceholder.typicode.com/users")
+TIMEOUT = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "20"))
+logger = configure_logging("employee_records")
 
 
-# %%
-# Define the URL for the API endpoint
-url = "https://jsonplaceholder.typicode.com/users"
-
-## Extract the data from the API
-try:
-    response = requests.get(url)
-    response.raise_for_status()
-except requests.exceptions.HTTPError as http_err:
-    print(f"HTTP error occurred: {http_err}")
-    sys.exit()
-except requests.exceptions.ConnectionError as conn_err:
-    print(f"Connection error occurred: {conn_err}")
-    sys.exit()
-except Exception as err:
-    print(f"An unexpected error occurred: {err}")
-    sys.exit()
-    
-raw_employee_data = response.json()
-print(raw_employee_data)
-print("Data fetched successfully from the API.")
+def transform(payload: list[dict]) -> pd.DataFrame:
+    frame = pd.json_normalize(payload).rename(columns={
+        "id": "employee_id", "name": "full_name", "address.street": "street",
+        "address.suite": "suite", "address.city": "city",
+        "address.zipcode": "zipcode", "company.name": "company_name",
+        "address.geo.lat": "address_geo_lat", "address.geo.lng": "address_geo_lng",
+    })
+    columns = ["employee_id", "full_name", "username", "email", "street", "suite",
+               "city", "zipcode", "phone", "website", "company_name",
+               "address_geo_lat", "address_geo_lng"]
+    for column in columns:
+        if column not in frame:
+            frame[column] = None
+    for column in ("address_geo_lat", "address_geo_lng"):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    return frame[columns]
 
 
-#%%
-#  Transform the JSON data to a pandas DataFrame
-employee_records = pd.json_normalize(raw_employee_data)
-employee_records
+def main() -> None:
+    engine = database_engine("employee_records")
+    apply_migrations(engine, Path(__file__).parent / "migrations")
+    with PipelineRun(engine, "employee_records", logger) as run:
+        payload = fetch_json(URL, logger, TIMEOUT)
+        data = transform(payload)
+        run.add_counts(fetched=len(payload), filtered=len(payload) - len(data))
+        validate_frame(data, {"employee_id": "numeric", "full_name": "text"}, logger, {
+            "employee_id": "numeric", "full_name": "text", "username": "text",
+            "email": "text", "street": "text", "suite": "text", "city": "text",
+            "zipcode": "text", "phone": "text", "website": "text",
+            "company_name": "text", "address_geo_lat": "numeric", "address_geo_lng": "numeric",
+        })
+        if (data["employee_id"] <= 0).any() or data["full_name"].str.strip().eq("").any():
+            raise ValueError("Employee identifiers must be positive and names cannot be blank")
+        if not data["address_geo_lat"].dropna().between(-90, 90).all():
+            raise ValueError("Employee latitude must be between -90 and 90")
+        if not data["address_geo_lng"].dropna().between(-180, 180).all():
+            raise ValueError("Employee longitude must be between -180 and 180")
+        run.add_counts(**load_frame(data, engine, "employee_records", logger, conflict="replace"))
 
-# Cleaning data
-employee_records = employee_records.rename(columns={
-    'id': 'employee_id',
-    'name': 'full_name',
-    'username': 'username',
-    'email': 'email',
-    'address.street': 'street',
-    'address.suite': 'suite',
-    'address.city': 'city',
-    'address.zipcode': 'zipcode',
-    'phone': 'phone',
-    'website': 'website',
-    'company.name': 'company_name'
-})
-employee_records
-#%%
-# This instantly changes "address.geo.lat" to "address_geo_lat"
-employee_records.columns = employee_records.columns.str.replace('.', '_')
 
-employee_records
-# %%
-# Connection to SQLite database
-sql_conn = sql.connect('employee_records.db')
-employee_records.to_sql("employee_records", 
-                        sql_conn,
-                        if_exists='replace', 
-                        index=False)  
-print("Data has been successfully stored in the SQLite database.") 
-# %%
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        logger.exception("Employee pipeline failed")
+        raise

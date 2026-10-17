@@ -9,3 +9,7 @@ __pycache__/
 
 # Ignore environment variables
 .env
+.venv/
+data/
+logs/
+.pytest_cache/

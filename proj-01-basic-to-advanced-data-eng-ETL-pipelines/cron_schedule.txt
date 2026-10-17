@@ -1,8 +1,7 @@
-# employee_records.db
-0 5 * * * /usr/bin/python3 /home/bhrajo/dsa-repo/dsa-workspace/data-engineering-lab/ETL/proj-05-ETL-daily-employee-record.py
-
-# global_education.db
-0 1 * * * /usr/bin/python3 /home/bhrajo/dsa-repo/dsa-workspace/data-engineering-lab/ETL/proj-06-ETL-global-education-data-pipeline/global_edu.py
-
-# earthquake_monitoring.db
-0 3 * * * /usr/bin/python3 /home/bhrajo/dsa-repo/dsa-workspace/data-engineering-lab/ETL/02-ETL-global-earthquake-data-pipeline/global_earthquake.py
+# Daily schedules for the repository path supplied for this workspace.
+# The runner uses .venv/bin/python and writes structured logs under logs/.
+0 1 * * * /home/jeahiave/mydev/DSA-Portfolio/proj-01-basic-to-advanced-data-eng-ETL-pipelines/scripts/run_pipeline.sh global_education
+0 3 * * * /home/jeahiave/mydev/DSA-Portfolio/proj-01-basic-to-advanced-data-eng-ETL-pipelines/scripts/run_pipeline.sh global_earthquake
+0 4 * * * /home/jeahiave/mydev/DSA-Portfolio/proj-01-basic-to-advanced-data-eng-ETL-pipelines/scripts/run_pipeline.sh stock_update
+0 5 * * * /home/jeahiave/mydev/DSA-Portfolio/proj-01-basic-to-advanced-data-eng-ETL-pipelines/scripts/run_pipeline.sh employee_records
+15 6 * * * cd /home/jeahiave/mydev/DSA-Portfolio/proj-01-basic-to-advanced-data-eng-ETL-pipelines && .venv/bin/python scripts/check_freshness.py --max-age-hours 30

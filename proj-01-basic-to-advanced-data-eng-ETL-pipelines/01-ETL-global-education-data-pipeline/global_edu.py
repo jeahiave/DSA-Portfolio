@@ -1,65 +1,64 @@
-#%% 
-#Importing necessary libraries
+"""Refresh a validated UK university reference directory."""
+from __future__ import annotations
+
+import os
 import sys
-import requests
+from pathlib import Path
+
 import pandas as pd
-import numpy as np
-import sqlite3 as sql
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from pipeline_utils import apply_migrations, configure_logging, database_engine, fetch_json, load_frame, PipelineRun, validate_frame  # noqa: E402
+
+COUNTRY = os.getenv("EDUCATION_COUNTRY", "United Kingdom")
+URL = os.getenv("EDUCATION_API_URL", "https://universities.hipolabs.com/search?country=" + COUNTRY.replace(" ", "+"))
+TIMEOUT = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "20"))
+logger = configure_logging("global_education")
 
 
-#%%
-##Initiating Data Extraction from API
-
- # Defining API endpoint
-url = "http://universities.hipolabs.com/search?country=United+Kingdom"  
-try:
-    response = requests.get(url)  # Making GET request to the API
-    response.raise_for_status()  # Check if the request was successful
-except requests.exceptions.ConnectionError as conn_err:
-    print(f"Internet Connection Failed: {conn_err}")
-    sys.exit()
-except requests.exceptions.HTTPError as http_err:
-    print(f"HTTP Error Occurred: {http_err}")
-    sys.exit()
-except requests.exceptions.RequestException as req_err:
-    print(f"Request Error Occurred: {req_err}")
-    sys.exit()
-except Exception as err:
-    print(f"An Unexpected Error Occurred: {err}")
-    sys.exit() 
-    
-raw_data = response.json()  # Parsing the JSON response
-print("Data extraction successful!")
-print(raw_data)
-
-
-#%%
-##Data Transformation
-# Converting raw data to DataFrame
-df = pd.json_normalize(raw_data)
-
-# Cleaning column names by replacing dots with underscores
-df.columns = df.columns.str.replace('.', '_')
-
-# Convert list columns to comma-separated strings to make them hashable
-for col in df.columns:
-    df[col] = df[col].apply(lambda x: ', '.join(x) 
-                            if isinstance(x, list) else x)
-print("Data transformation successful!")
-
-# Keep only the rows where web_pages is NOT EQUAL (!=) to an empty string
-df = df[df['web_pages'] != ""]
-print(f"\nShape after dropping empty websites: {df.shape}")
-
-# Dropping duplicate rows from the DataFrame
-df.drop_duplicates(inplace=True)
-print(f"\nShape after dropping duplicates: {df.shape}")
-print("Data cleaning successful!")
-print(df)
+def transform(payload: list[dict]) -> pd.DataFrame:
+    frame = pd.json_normalize(payload)
+    if not {"name", "country", "web_pages"}.issubset(frame.columns):
+        raise ValueError("University response is missing required fields")
+    if frame["name"].isna().any() or frame["country"].isna().any():
+        raise ValueError("University name and country are required")
+    frame = frame[frame["name"].astype(str).str.strip().ne("")].copy()
+    for column in ("web_pages", "domains"):
+        if column not in frame:
+            frame[column] = [[] for _ in range(len(frame))]
+        frame[column] = frame[column].map(
+            lambda value: ", ".join(map(str, value)) if isinstance(value, list)
+            else ("" if pd.isna(value) else str(value))
+        )
+    frame = frame[frame.web_pages.str.strip().ne("")].copy()
+    frame["alpha_two_code"] = frame.get("alpha_two_code", "")
+    frame["state_province"] = frame.get("state-province")
+    frame["university_id"] = frame.apply(
+        lambda row: (str(row["alpha_two_code"]) + ":" + str(row["name"]).strip().casefold()
+                     + ":" + row["web_pages"].casefold()), axis=1)
+    return frame[["university_id", "name", "country", "alpha_two_code",
+                  "state_province", "web_pages", "domains"]].drop_duplicates(
+                      subset=["university_id"]).reset_index(drop=True)
 
 
-# %%
-##Connecting to the database
-conn = sql.connect('global_education.db')
-df.to_sql('universities', conn, if_exists='replace', index=False) # Loading clean datai nto the database
-print("Data loading successful!")
+def main() -> None:
+    engine = database_engine("global_education")
+    apply_migrations(engine, Path(__file__).parent / "migrations")
+    with PipelineRun(engine, "global_education", logger) as run:
+        payload = fetch_json(URL, logger, TIMEOUT)
+        data = transform(payload)
+        run.add_counts(fetched=len(payload), filtered=len(payload) - len(data))
+        validate_frame(data, {"university_id": "text", "name": "text", "country": "text"}, logger, {
+            "university_id": "text", "name": "text", "country": "text",
+            "alpha_two_code": "text", "state_province": "text",
+            "web_pages": "text", "domains": "text",
+        })
+        run.add_counts(**load_frame(data, engine, "universities", logger, conflict="replace"))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        logger.exception("Education pipeline failed")
+        raise

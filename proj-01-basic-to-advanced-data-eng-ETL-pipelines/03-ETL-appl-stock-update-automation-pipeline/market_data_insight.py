@@ -1,101 +1,116 @@
+"""Fetch recent prices, persist them, and produce a plain data summary and chart."""
+from __future__ import annotations
+
 import os
-import pandas as pd
-import yfinance as yf
-from sqlalchemy import create_engine
-from dotenv import load_dotenv
-from google import genai
-import matplotlib.pyplot as plt
+import sys
+import time
+from pathlib import Path
+
 import matplotlib
-matplotlib.use('QtAgg')
+
+matplotlib.use("Agg")  # Headless backend for scheduled runs.
+import matplotlib.pyplot as plt
+import pandas as pd
 import seaborn as sns
+import yfinance as yf
 
-# --- Configuration ---
-TICKER = "AAPL"  # Company symbol
-DAYS = "5d"      # yfinance period
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from pipeline_utils import apply_migrations, configure_logging, database_engine, load_frame, PipelineRun, validate_frame  # noqa: E402
 
-# Load environment variables (DB_URL and GEMINI_API_KEY)
-load_dotenv()
-db_url = os.getenv("DB_URL")
-if not db_url:
-    raise ValueError("DB_URL not set in .env file")
-engine = create_engine(db_url) # Create database engine once
+TICKER = os.getenv("STOCK_TICKER", "AAPL").upper()
+PERIOD = os.getenv("STOCK_PERIOD", "5d")
+INTERVAL = os.getenv("STOCK_INTERVAL", "1d")
+TIMEOUT = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "20"))
+MAX_STALENESS_DAYS = int(os.getenv("STOCK_MAX_STALENESS_DAYS", "7"))
+logger = configure_logging("stock_update")
 
-# --- Fetch live market data ---
-print(f"Fetching data for {TICKER}...")
-ticker_data = yf.Ticker(TICKER)
-historical_data = ticker_data.history(period=DAYS)
 
-# Data Cleaning: Remove unnecessary columns
-clean_data = historical_data.drop(columns=['Dividends', 'Stock Splits'])
-print("Extraction successful. Sending to database...")
-clean_data.to_sql("market_data", engine, if_exists='replace', index=True)
-print("Data sent to database.\n")
+def transform(history: pd.DataFrame) -> pd.DataFrame:
+    if history.empty:
+        raise ValueError("Market data source returned no rows")
+    frame = history.rename_axis("date").reset_index()
+    frame.columns = [str(column).lower().replace(" ", "_") for column in frame.columns]
+    frame = frame.rename(columns={"stock_splits": "stock_splits", "dividends": "dividends"})
+    frame["date"] = pd.to_datetime(frame["date"], utc=True).dt.tz_localize(None)
+    columns = ["date", "open", "high", "low", "close", "volume"]
+    missing = set(columns) - set(frame.columns)
+    if missing:
+        raise ValueError(f"Market data missing fields: {sorted(missing)}")
+    frame = frame[columns].dropna(subset=columns).drop_duplicates(subset=["date"])
+    frame["volume"] = frame["volume"].astype("int64")
+    return frame
 
-# --- Retrieve data for AI analysis ---
-print("Retrieving market data for analysis...")
-query = """
-    SELECT * FROM market_data
-    WHERE "Date" >= CURRENT_DATE - INTERVAL '5 days'
-    ORDER BY "Date" DESC
-"""
-try:
-    df_analysis = pd.read_sql(query, engine)
-except Exception as e:
-    print(f"Error reading data: {e}")
-    exit(1)
-if df_analysis.empty:
-    print("No market data found for the last 5 days.")
-    exit(0)
-    
-# Format data as clean Markdown for the AI
-data_markdown = df_analysis.to_markdown(index=False)
 
-# --- 3. Gemini analysis ---
-print("Sending data to Gemini for marketing insights...\n")
-client = genai.Client()  # auto-reads GEMINI_API_KEY from env
-prompt = f"""
-You are an expert Data-Driven Digital Marketer. 
-I am going to provide you with the last 5 days of stock market data.
-
-Here is the data:
-{data_markdown}
-
-Based on this data, please generate 3 short, punchy business insights. 
-Write them in a professional but engaging tone, suitable for a ProMarketa LinkedIn post or a marketing newsletter. Keep it concise.
-"""
-
-try:
-    response = client.models.generate_content(
-        model='gemini-2.5-flash-lite',
-        contents=prompt
+def validate_market_ranges(data: pd.DataFrame) -> None:
+    valid_ohlc = (
+        (data["low"] > 0)
+        & (data["high"] >= data[["open", "close", "low"]].max(axis=1))
+        & (data["low"] <= data[["open", "close", "high"]].min(axis=1))
+        & (data["volume"] >= 0)
     )
-    print("--- AI GENERATED MARKETING INSIGHTS ---")
-    print(response.text)
-    print("---------------------------------------\n")
-except Exception as e:
-    print(f"Gemini API error: {e}")
-    exit(1)
+    now = pd.Timestamp.now(tz="UTC").tz_localize(None)
+    latest_allowed = now + pd.Timedelta(days=1)
+    source_is_stale = now - data["date"].max() > pd.Timedelta(days=MAX_STALENESS_DAYS)
+    if not valid_ohlc.all() or (data["date"] > latest_allowed).any() or source_is_stale:
+        raise ValueError("Stock OHLC, volume, or date values failed range checks")
 
-# --- 4. Visualization ---
-print("Creating chart...")
 
-# Load full data for visualization (no date filter needed)
-df_viz = pd.read_sql("market_data", engine)
-df_viz['Date'] = pd.to_datetime(df_viz['Date']).dt.strftime('%Y-%m-%d')
+def main() -> None:
+    engine = database_engine("market_data")
+    apply_migrations(engine, Path(__file__).parent / "migrations")
+    with PipelineRun(engine, "stock_update", logger) as run:
+        logger.info("Fetching market history", extra={"ticker": TICKER, "period": PERIOD,
+                                                       "interval": INTERVAL})
+        for attempt in range(1, 4):
+            try:
+                history = yf.Ticker(TICKER).history(
+                    period=PERIOD, interval=INTERVAL, auto_adjust=False,
+                    actions=False, timeout=TIMEOUT, raise_errors=True,
+                )
+                data = transform(history)
+                break
+            except Exception as error:
+                if attempt == 3:
+                    raise
+                logger.warning("Market data request failed; retrying", extra={
+                    "attempt": attempt, "max_attempts": 3, "error": str(error),
+                })
+                time.sleep(2 ** (attempt - 1))
+        run.add_counts(fetched=len(history), filtered=len(history) - len(data))
+        validate_frame(data, {"date": "datetime", "close": "numeric", "volume": "numeric"}, logger, {
+            "date": "datetime", "open": "numeric", "high": "numeric",
+            "low": "numeric", "close": "numeric", "volume": "numeric",
+        })
+        validate_market_ranges(data)
 
-# Set style and plot
-sns.set_theme(style="darkgrid")
-plt.figure(figsize=(10, 6))
-sns.lineplot(data=df_viz, x='Date', y='Close', marker='o',
-             color='#2E86AB', linewidth=3, markersize=10)
-plt.title('Market Performance - AAPL Closing Prices', fontsize=16,
-          fontweight='bold', pad=20)
-plt.xlabel('Trading Date', fontsize=12, labelpad=10)
-plt.ylabel('Closing Price (USD)', fontsize=12, labelpad=10)
-plt.xticks(rotation=45)
-plt.tight_layout()
+        # Prices are a refreshed snapshot for the configured window.
+        run.add_counts(**load_frame(data, engine, "market_data", logger, conflict="replace"))
+        ordered = data.sort_values("date")
+        latest = ordered.iloc[-1]
+        first_close = float(ordered.iloc[0]["close"])
+        change_pct = (float(latest["close"]) / first_close - 1) * 100 if first_close else 0.0
+        summary = (f"{TICKER} closed at ${latest['close']:.2f} on "
+                   f"{latest['date']:%Y-%m-%d}, {change_pct:+.2f}% across "
+                   f"{len(data)} trading sessions in this snapshot.")
+        logger.info("Market summary", extra={"summary": summary})
 
-filename = 'promarketa_market_chart.png'
-plt.savefig(filename, dpi=300)
-print(f"Chart saved as '{filename}'.")
-plt.show()  
+        sns.set_theme(style="darkgrid")
+        fig, axis = plt.subplots(figsize=(10, 6))
+        sns.lineplot(data=data, x="date", y="close", marker="o", ax=axis,
+                     color="#2E86AB", linewidth=2)
+        axis.set(title=f"{TICKER} closing prices", xlabel="Trading date",
+                 ylabel="Closing price (USD)")
+        fig.autofmt_xdate()
+        fig.tight_layout()
+        chart_path = Path(__file__).parent / "promarketa_market_chart.png"
+        fig.savefig(chart_path, dpi=180)
+        plt.close(fig)
+        logger.info("Chart saved", extra={"path": str(chart_path)})
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        logger.exception("Stock pipeline failed")
+        raise
