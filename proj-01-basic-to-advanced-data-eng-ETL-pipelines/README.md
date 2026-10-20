@@ -150,3 +150,14 @@ The pytest suite checks transformations, domain ranges, migration repeatability 
 ├── .env.example
 └── requirements.txt
 ```
+## Portfolio visualizations
+
+`generate_portfolio_visualizations.py` creates a four-lane ETL flow diagram and one analysis chart per pipeline using Seaborn and Matplotlib. It fetches the same public sources used by the jobs, applies each pipeline's existing transformation function, and saves dated PNGs in `portfolio_visualizations/`. The employee endpoint is mock data; market prices are descriptive snapshots.
+
+Run it from the repository root when you want to refresh the portfolio figures:
+
+```bash
+.venv/bin/python generate_portfolio_visualizations.py
+```
+
+The generated charts include employee mock-profile coordinates, transformed university website domains, qualifying USGS events, and AAPL closing price with volume. The AI-generated `etl-pipelines-thumbnail.png` in the same folder is the card cover and is intentionally kept separate from the data charts. The stock, university, and earthquake figures describe the snapshot date shown in each image.
